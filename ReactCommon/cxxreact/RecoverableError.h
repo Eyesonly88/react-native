@@ -8,7 +8,6 @@
 
 namespace facebook {
 namespace react {
-namespace detail {
 
 /**
  * RecoverableError
@@ -18,7 +17,7 @@ namespace detail {
 struct RecoverableError : public std::exception {
 
   explicit RecoverableError(const std::string &what_)
-    : m_what {what_}
+    : m_what { "facebook::react::Recoverable: " + what_ }
   {}
 
   virtual const char* what() const throw() override { return m_what.c_str(); }
@@ -42,6 +41,5 @@ private:
   std::string m_what;
 };
 
-} // namespace detail
 } // namespace react
 } // namespace facebook

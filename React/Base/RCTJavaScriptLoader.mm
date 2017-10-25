@@ -22,6 +22,31 @@
 
 NSString *const RCTJavaScriptLoaderErrorDomain = @"RCTJavaScriptLoaderErrorDomain";
 
+@interface RCTSource()
+{
+@public
+  NSURL *_url;
+  NSData *_data;
+  NSUInteger _length;
+  NSInteger _filesChangedCount;
+}
+
+@end
+
+@implementation RCTSource
+
+static RCTSource *RCTSourceCreate(NSURL *url, NSData *data, int64_t length) NS_RETURNS_RETAINED
+{
+  RCTSource *source = [RCTSource new];
+  source->_url = url;
+  source->_data = data;
+  source->_length = length;
+  source->_filesChangedCount = RCTSourceFilesChangedCountNotBuiltByBundler;
+  return source;
+}
+
+@end
+
 @implementation RCTLoadingProgress
 
 - (NSString *)description
@@ -29,7 +54,7 @@ NSString *const RCTJavaScriptLoaderErrorDomain = @"RCTJavaScriptLoaderErrorDomai
   NSMutableString *desc = [NSMutableString new];
   [desc appendString:_status ?: @"Loading"];
 
-  if (_total > 0) {
+  if ([_total integerValue] > 0) {
     [desc appendFormat:@" %ld%% (%@/%@)", (long)(100 * [_done integerValue] / [_total integerValue]), _done, _total];
   }
   [desc appendString:@"\u2026"];
@@ -51,7 +76,7 @@ RCT_NOT_IMPLEMENTED(- (instancetype)init)
                                               sourceLength:&sourceLength
                                                      error:&error];
   if (data) {
-    onComplete(nil, data, sourceLength);
+    onComplete(nil, RCTSourceCreate(scriptURL, data, sourceLength));
     return;
   }
 
@@ -62,7 +87,7 @@ RCT_NOT_IMPLEMENTED(- (instancetype)init)
   if (isCannotLoadSyncError) {
     attemptAsynchronousLoadOfBundleAtURL(scriptURL, onProgress, onComplete);
   } else {
-    onComplete(error, nil, 0);
+    onComplete(error, nil);
   }
 }
 
@@ -81,8 +106,8 @@ RCT_NOT_IMPLEMENTED(- (instancetype)init)
                                    code:RCTJavaScriptLoaderErrorNoScriptURL
                                userInfo:@{NSLocalizedDescriptionKey:
                                             [NSString stringWithFormat:@"No script URL provided. Make sure the packager is "
-                                             @"running or you have embedded a JS bundle in your application bundle."
-                                             @"unsanitizedScriptURLString:(%@)", unsanitizedScriptURLString]}];
+                                             @"running or you have embedded a JS bundle in your application bundle.\n\n"
+                                             @"unsanitizedScriptURLString = %@", unsanitizedScriptURLString]}];
     }
     return nil;
   }
@@ -114,7 +139,7 @@ RCT_NOT_IMPLEMENTED(- (instancetype)init)
     return nil;
   }
 
-  facebook::react::BundleHeader header{};
+  facebook::react::BundleHeader header;
   size_t readResult = fread(&header, sizeof(header), 1, bundle);
   fclose(bundle);
   if (readResult != 1) {
@@ -132,7 +157,16 @@ RCT_NOT_IMPLEMENTED(- (instancetype)init)
   case facebook::react::ScriptTag::RAMBundle:
     break;
 
-  case facebook::react::ScriptTag::String:
+  case facebook::react::ScriptTag::String: {
+#if RCT_ENABLE_INSPECTOR
+    NSData *source = [NSData dataWithContentsOfFile:scriptURL.path
+                                            options:NSDataReadingMappedIfSafe
+                                              error:error];
+    if (sourceLength && source != nil) {
+      *sourceLength = source.length;
+    }
+    return source;
+#else
     if (error) {
       *error = [NSError errorWithDomain:RCTJavaScriptLoaderErrorDomain
                                    code:RCTJavaScriptLoaderErrorCannotBeLoadedSynchronously
@@ -140,13 +174,23 @@ RCT_NOT_IMPLEMENTED(- (instancetype)init)
                                             @"Cannot load text/javascript files synchronously"}];
     }
     return nil;
-
+#endif
+  }
   case facebook::react::ScriptTag::BCBundle:
-    if (header.BCVersion != runtimeBCVersion) {
+    if (runtimeBCVersion == JSNoBytecodeFileFormatVersion || runtimeBCVersion < 0) {
+      if (error) {
+        *error = [NSError errorWithDomain:RCTJavaScriptLoaderErrorDomain
+                                     code:RCTJavaScriptLoaderErrorBCNotSupported
+                                 userInfo:@{NSLocalizedDescriptionKey:
+                                              @"Bytecode bundles are not supported by this runtime."}];
+      }
+      return nil;
+    }
+    else if ((uint32_t)runtimeBCVersion != header.version) {
       if (error) {
         NSString *errDesc =
-          [NSString stringWithFormat:@"BC Version Mismatch. Expect: %d, Actual: %d",
-                    runtimeBCVersion, header.BCVersion];
+          [NSString stringWithFormat:@"BC Version Mismatch. Expect: %d, Actual: %u",
+                    runtimeBCVersion, header.version];
 
         *error = [NSError errorWithDomain:RCTJavaScriptLoaderErrorDomain
                                      code:RCTJavaScriptLoaderErrorBCVersion
@@ -173,6 +217,10 @@ RCT_NOT_IMPLEMENTED(- (instancetype)init)
   return [NSData dataWithBytes:&header length:sizeof(header)];
 }
 
+static void parseHeaders(NSDictionary *headers, RCTSource *source) {
+  source->_filesChangedCount = [headers[@"X-Metro-Files-Changed-Count"] integerValue];
+}
+
 static void attemptAsynchronousLoadOfBundleAtURL(NSURL *scriptURL, RCTSourceLoadProgressBlock onProgress, RCTSourceLoadBlock onComplete)
 {
   scriptURL = sanitizeURL(scriptURL);
@@ -184,11 +232,10 @@ static void attemptAsynchronousLoadOfBundleAtURL(NSURL *scriptURL, RCTSourceLoad
       NSData *source = [NSData dataWithContentsOfFile:scriptURL.path
                                               options:NSDataReadingMappedIfSafe
                                                 error:&error];
-      onComplete(error, source, source.length);
+      onComplete(error, RCTSourceCreate(scriptURL, source, source.length));
     });
     return;
   }
-
 
   RCTMultipartDataTask *task = [[RCTMultipartDataTask alloc] initWithURL:scriptURL partHandler:^(NSInteger statusCode, NSDictionary *headers, NSData *data, NSError *error, BOOL done) {
     if (!done) {
@@ -209,19 +256,20 @@ static void attemptAsynchronousLoadOfBundleAtURL(NSURL *scriptURL, RCTSourceLoad
                      [@"Could not connect to development server.\n\n"
                       "Ensure the following:\n"
                       "- Node server is running and available on the same network - run 'npm start' from react-native root\n"
-                      "- Node server URL is correctly set in AppDelegate\n\n"
+                      "- Node server URL is correctly set in AppDelegate\n"
+                      "- WiFi is enabled and connected to the same network as the Node Server\n\n"
                       "URL: " stringByAppendingString:scriptURL.absoluteString],
                    NSLocalizedFailureReasonErrorKey: error.localizedDescription,
                    NSUnderlyingErrorKey: error,
                    }];
       }
-      onComplete(error, nil, 0);
+      onComplete(error, nil);
       return;
     }
 
     // For multipart responses packager sets X-Http-Status header in case HTTP status code
     // is different from 200 OK
-    NSString *statusCodeHeader = [headers valueForKey:@"X-Http-Status"];
+    NSString *statusCodeHeader = headers[@"X-Http-Status"];
     if (statusCodeHeader) {
       statusCode = [statusCodeHeader integerValue];
     }
@@ -230,10 +278,35 @@ static void attemptAsynchronousLoadOfBundleAtURL(NSURL *scriptURL, RCTSourceLoad
       error = [NSError errorWithDomain:@"JSServer"
                                   code:statusCode
                               userInfo:userInfoForRawResponse([[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding])];
-      onComplete(error, nil, 0);
+      onComplete(error, nil);
       return;
     }
-    onComplete(nil, data, data.length);
+
+    // Validate that the packager actually returned javascript.
+    NSString *contentType = headers[@"Content-Type"];
+    NSString *mimeType = [[contentType componentsSeparatedByString:@";"] firstObject];
+    if (![mimeType isEqualToString:@"application/javascript"] &&
+        ![mimeType isEqualToString:@"text/javascript"]) {
+      NSString *description = [NSString stringWithFormat:@"Expected MIME-Type to be 'application/javascript' or 'text/javascript', but got '%@'.", mimeType];
+      error = [NSError errorWithDomain:@"JSServer"
+                                  code:NSURLErrorCannotParseResponse
+                              userInfo:@{
+                                         NSLocalizedDescriptionKey: description,
+                                         @"headers": headers,
+                                         @"data": data
+                                       }];
+      onComplete(error, nil);
+      return;
+    }
+
+    RCTSource *source = RCTSourceCreate(scriptURL, data, data.length);
+    parseHeaders(headers, source);
+    onComplete(nil, source);
+  } progressHandler:^(NSDictionary *headers, NSNumber *loaded, NSNumber *total) {
+    // Only care about download progress events for the javascript bundle part.
+    if ([headers[@"Content-Type"] isEqualToString:@"application/javascript"]) {
+      onProgress(progressEventFromDownloadProgress(loaded, total));
+    }
   }];
 
   [task startTask];
@@ -254,9 +327,19 @@ static RCTLoadingProgress *progressEventFromData(NSData *rawData)
   }
 
   RCTLoadingProgress *progress = [RCTLoadingProgress new];
-  progress.status = [info valueForKey:@"status"];
-  progress.done = [info valueForKey:@"done"];
-  progress.total = [info valueForKey:@"total"];
+  progress.status = info[@"status"];
+  progress.done = info[@"done"];
+  progress.total = info[@"total"];
+  return progress;
+}
+
+static RCTLoadingProgress *progressEventFromDownloadProgress(NSNumber *total, NSNumber *done)
+{
+  RCTLoadingProgress *progress = [RCTLoadingProgress new];
+  progress.status = @"Downloading JavaScript bundle";
+  // Progress values are in bytes transform them to kilobytes for smaller numbers.
+  progress.done = done != nil ? @([done integerValue] / 1024) : nil;
+  progress.total = total != nil ? @([total integerValue] / 1024) : nil;
   return progress;
 }
 
@@ -272,12 +355,11 @@ static NSDictionary *userInfoForRawResponse(NSString *rawText)
   }
   NSMutableArray<NSDictionary *> *fakeStack = [NSMutableArray new];
   for (NSDictionary *err in errors) {
-    [fakeStack addObject:
-     @{
+    [fakeStack addObject: @{
        @"methodName": err[@"description"] ?: @"",
        @"file": err[@"filename"] ?: @"",
        @"lineNumber": err[@"lineNumber"] ?: @0
-       }];
+    }];
   }
   return @{NSLocalizedDescriptionKey: parsedResponse[@"message"] ?: @"No message provided", @"stack": [fakeStack copy]};
 }

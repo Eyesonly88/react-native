@@ -1,8 +1,9 @@
-android_library(
-  name = 'perftest',
-  srcs = glob(['*.java']),
-  visibility = [
-    'PUBLIC',
-  ],
-)
+include_defs("//ReactAndroid/DEFS")
 
+android_library(
+    name = "perftest",
+    srcs = glob(["*.java"]),
+    visibility = [
+        "PUBLIC",
+    ],
+)

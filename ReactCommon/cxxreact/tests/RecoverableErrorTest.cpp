@@ -7,7 +7,7 @@
 
 #include <cxxreact/RecoverableError.h>
 
-using namespace facebook::react::detail;
+using namespace facebook::react;
 
 TEST(RecoverableError, RunRethrowingAsRecoverableRecoverTest) {
   try {
@@ -16,7 +16,7 @@ TEST(RecoverableError, RunRethrowingAsRecoverableRecoverTest) {
       });
     FAIL() << "Unthrown exception";
   } catch (const RecoverableError &err) {
-    ASSERT_STREQ(err.what(), "catch me");
+    ASSERT_STREQ(err.what(), "facebook::react::Recoverable: catch me");
   } catch (...) {
     FAIL() << "Uncaught exception";
   }

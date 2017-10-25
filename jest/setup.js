@@ -10,14 +10,21 @@
 
 const mockComponent = require.requireActual('./mockComponent');
 
-require.requireActual('../packager/react-packager/src/Resolver/polyfills/babelHelpers.js');
-require.requireActual('../packager/react-packager/src/Resolver/polyfills/Object.es7.js');
-require.requireActual('../packager/react-packager/src/Resolver/polyfills/error-guard');
+require.requireActual('../Libraries/polyfills/babelHelpers.js');
+require.requireActual('../Libraries/polyfills/Object.es7.js');
+require.requireActual('../Libraries/polyfills/error-guard');
 
 global.__DEV__ = true;
 
 global.Promise = require.requireActual('promise');
 global.regeneratorRuntime = require.requireActual('regenerator-runtime/runtime');
+
+global.requestAnimationFrame = function(callback) {
+  return setTimeout(callback, 0);
+};
+global.cancelAnimationFrame = function(id) {
+  clearTimeout(id);
+};
 
 jest
   .mock('setupDevtools')
@@ -27,7 +34,7 @@ jest
 jest.setMock('ErrorUtils', require('ErrorUtils'));
 
 jest
-  .mock('ReactNativeDefaultInjection')
+  .mock('InitializeCore', () => {})
   .mock('Image', () => mockComponent('Image'))
   .mock('Text', () => mockComponent('Text'))
   .mock('TextInput', () => mockComponent('TextInput'))
@@ -50,7 +57,7 @@ jest
           Object.keys(dataBlob).forEach(key => {
             this.items += dataBlob[key] && (
               dataBlob[key].length || dataBlob[key].size || 0
-            )
+            );
           });
         } catch (e) {
           this.items = 'unknown';
@@ -60,6 +67,44 @@ jest
       return new ListViewDataSource(this._dataBlob);
     };
     return DataSource;
+  })
+  .mock('AnimatedImplementation', () => {
+    const AnimatedImplementation = require.requireActual('AnimatedImplementation');
+    const oldCreate = AnimatedImplementation.createAnimatedComponent;
+    AnimatedImplementation.createAnimatedComponent = function(Component) {
+      const Wrapped = oldCreate(Component);
+      Wrapped.__skipSetNativeProps_FOR_TESTS_ONLY = true;
+      return Wrapped;
+    };
+    return AnimatedImplementation;
+  })
+  .mock('ReactNative', () => {
+    const ReactNative = require.requireActual('ReactNative');
+    const NativeMethodsMixin =
+      ReactNative.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED.NativeMethodsMixin;
+    [
+      'measure',
+      'measureInWindow',
+      'measureLayout',
+      'setNativeProps',
+      'focus',
+      'blur',
+    ].forEach((key) => {
+      let warned = false;
+      NativeMethodsMixin[key] = function() {
+        if (warned) {
+          return;
+        }
+        warned = true;
+        console.warn(
+          'Calling .' + key + '() in the test renderer environment is not ' +
+            'supported. Instead, mock out your components that use ' +
+            'findNodeHandle with replacements that don\'t rely on the ' +
+            'native environment.',
+        );
+      };
+    });
+    return ReactNative;
   })
   .mock('ensureComponentIsNative', () => () => true);
 
@@ -72,10 +117,12 @@ const mockNativeModules = {
     addEventListener: jest.fn(),
   },
   AsyncLocalStorage: {
-    clear: jest.fn(),
-    getItem: jest.fn(),
-    removeItem: jest.fn(),
-    setItem: jest.fn(),
+    multiGet: jest.fn((keys, callback) => process.nextTick(() => callback(null, []))),
+    multiSet: jest.fn((entries, callback) => process.nextTick(() => callback(null))),
+    multiRemove: jest.fn((keys, callback) => process.nextTick(() => callback(null))),
+    multiMerge: jest.fn((entries, callback) => process.nextTick(() => callback(null))),
+    clear: jest.fn(callback => process.nextTick(() => callback(null))),
+    getAllKeys: jest.fn(callback => process.nextTick(() => callback(null, []))),
   },
   BuildInfo: {
     appVersion: '0',
@@ -86,6 +133,16 @@ const mockNativeModules = {
   },
   DataManager: {
     queryData: jest.fn(),
+  },
+  DeviceInfo: {
+    Dimensions: {
+      window: {
+        fontScale: 2,
+        height: 1334,
+        scale: 2,
+        width: 750,
+      },
+    },
   },
   FacebookSDK: {
     login: jest.fn(),
@@ -105,7 +162,7 @@ const mockNativeModules = {
   },
   ImageLoader: {
     getSize: jest.fn(
-      (uri, success) => process.nextTick(() => success(320, 240))
+      (url) => new Promise(() => ({width: 320, height: 240}))
     ),
     prefetchImage: jest.fn(),
   },
@@ -119,10 +176,56 @@ const mockNativeModules = {
     addListener: jest.fn(),
     removeListeners: jest.fn(),
   },
+  Linking: {
+    openURL: jest.fn(),
+    canOpenURL: jest.fn(
+      () => new Promise((resolve) => resolve(true))
+    ),
+    addEventListener: jest.fn(),
+    getInitialURL: jest.fn(
+      () => new Promise((resolve) => resolve())
+    ),
+    removeEventListener: jest.fn(),
+  },
+  LocationObserver: {
+    getCurrentPosition: jest.fn(),
+    startObserving: jest.fn(),
+    stopObserving: jest.fn(),
+  },
   ModalFullscreenViewManager: {},
+  NetInfo: {
+    fetch: jest.fn(
+      () => new Promise((resolve) => resolve())
+    ),
+    addEventListener: jest.fn(),
+    isConnected: {
+      fetch: jest.fn(
+        () => new Promise((resolve) => resolve())
+      ),
+      addEventListener: jest.fn(),
+    },
+  },
   Networking: {
     sendRequest: jest.fn(),
     abortRequest: jest.fn(),
+    addListener: jest.fn(),
+    removeListeners: jest.fn(),
+  },
+  PushNotificationManager: {
+    presentLocalNotification: jest.fn(),
+    scheduleLocalNotification: jest.fn(),
+    cancelAllLocalNotifications: jest.fn(),
+    removeAllDeliveredNotifications: jest.fn(),
+    getDeliveredNotifications: jest.fn(callback => process.nextTick(() => [])),
+    removeDeliveredNotifications: jest.fn(),
+    setApplicationIconBadgeNumber: jest.fn(),
+    getApplicationIconBadgeNumber: jest.fn(callback => process.nextTick(() => callback(0))),
+    cancelLocalNotifications: jest.fn(),
+    getScheduledLocalNotifications: jest.fn(callback => process.nextTick(() => callback())),
+    requestPermissions: jest.fn(() => Promise.resolve({alert: true, badge: true, sound: true})),
+    abandonPermissions: jest.fn(),
+    checkPermissions: jest.fn(callback => process.nextTick(() => callback({alert: true, badge: true, sound: true}))),
+    getInitialNotification: jest.fn(() => Promise.resolve(null)),
     addListener: jest.fn(),
     removeListeners: jest.fn(),
   },
@@ -130,6 +233,7 @@ const mockNativeModules = {
     scriptURL: null,
   },
   StatusBarManager: {
+    setColor: jest.fn(),
     setStyle: jest.fn(),
     setHidden: jest.fn(),
     setNetworkActivityIndicatorVisible: jest.fn(),
@@ -141,15 +245,25 @@ const mockNativeModules = {
     deleteTimer: jest.fn(),
   },
   UIManager: {
+    AndroidViewPager: {
+      Commands: {
+        setPage: jest.fn(),
+        setPageWithoutAnimation: jest.fn(),
+      },
+    },
+    blur: jest.fn(),
+    createView: jest.fn(),
+    dispatchViewManagerCommand: jest.fn(),
+    focus: jest.fn(),
+    setChildren: jest.fn(),
+    manageChildren: jest.fn(),
+    updateView: jest.fn(),
+    removeSubviewsFromContainerWithID: jest.fn(),
+    replaceExistingNonRootView: jest.fn(),
     customBubblingEventTypes: {},
     customDirectEventTypes: {},
-    Dimensions: {
-      window: {
-        fontScale: 2,
-        height: 1334,
-        scale: 2,
-        width: 750,
-      },
+    AndroidTextInput: {
+      Commands: {},
     },
     ModalFullscreenView: {
       Constants: {},
@@ -160,6 +274,15 @@ const mockNativeModules = {
     View: {
       Constants: {},
     },
+  },
+  BlobModule: {
+    BLOB_URI_SCHEME: 'content',
+    BLOB_URI_HOST: null,
+    enableBlobSupport: jest.fn(),
+    disableBlobSupport: jest.fn(),
+    createFromParts: jest.fn(),
+    sendBlob: jest.fn(),
+    release: jest.fn(),
   },
   WebSocketModule: {
     connect: jest.fn(),
@@ -190,9 +313,13 @@ jest
 jest.doMock('requireNativeComponent', () => {
   const React = require('react');
 
-  return viewName => props => React.createElement(
-    viewName,
-    props,
-    props.children,
-  );
+  return viewName => class extends React.Component {
+    render() {
+      return React.createElement(
+        viewName,
+        this.props,
+        this.props.children,
+      );
+    }
+  };
 });

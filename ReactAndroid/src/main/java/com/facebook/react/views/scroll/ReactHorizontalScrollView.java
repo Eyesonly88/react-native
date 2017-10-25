@@ -9,8 +9,6 @@
 
 package com.facebook.react.views.scroll;
 
-import javax.annotation.Nullable;
-
 import android.annotation.TargetApi;
 import android.content.Context;
 import android.graphics.Canvas;
@@ -21,12 +19,13 @@ import android.graphics.drawable.Drawable;
 import android.view.MotionEvent;
 import android.view.View;
 import android.widget.HorizontalScrollView;
-
 import com.facebook.infer.annotation.Assertions;
 import com.facebook.react.uimanager.MeasureSpecAssertions;
-import com.facebook.react.uimanager.events.NativeGestureUtil;
 import com.facebook.react.uimanager.ReactClippingViewGroup;
 import com.facebook.react.uimanager.ReactClippingViewGroupHelper;
+import com.facebook.react.uimanager.events.NativeGestureUtil;
+import com.facebook.react.views.view.ReactViewBackgroundManager;
+import javax.annotation.Nullable;
 
 /**
  * Similar to {@link ReactScrollView} but only supports horizontal scrolling.
@@ -35,6 +34,7 @@ public class ReactHorizontalScrollView extends HorizontalScrollView implements
     ReactClippingViewGroup {
 
   private final OnScrollDispatchHelper mOnScrollDispatchHelper = new OnScrollDispatchHelper();
+  private final VelocityHelper mVelocityHelper = new VelocityHelper();
 
   private boolean mActivelyScrolling;
   private @Nullable Rect mClippingRect;
@@ -48,6 +48,7 @@ public class ReactHorizontalScrollView extends HorizontalScrollView implements
   private @Nullable String mScrollPerfTag;
   private @Nullable Drawable mEndBackground;
   private int mEndFillColor = Color.TRANSPARENT;
+  private ReactViewBackgroundManager mReactBackgroundManager;
 
   public ReactHorizontalScrollView(Context context) {
     this(context, null);
@@ -55,6 +56,7 @@ public class ReactHorizontalScrollView extends HorizontalScrollView implements
 
   public ReactHorizontalScrollView(Context context, @Nullable FpsListener fpsListener) {
     super(context);
+    mReactBackgroundManager = new ReactViewBackgroundManager(this);
     mFpsListener = fpsListener;
   }
 
@@ -88,6 +90,10 @@ public class ReactHorizontalScrollView extends HorizontalScrollView implements
     mPagingEnabled = pagingEnabled;
   }
 
+  public void flashScrollIndicators() {
+    awakenScrollBars();
+  }
+
   @Override
   protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
     MeasureSpecAssertions.assertExplicitMeasureSpec(widthMeasureSpec, heightMeasureSpec);
@@ -107,14 +113,17 @@ public class ReactHorizontalScrollView extends HorizontalScrollView implements
   protected void onScrollChanged(int x, int y, int oldX, int oldY) {
     super.onScrollChanged(x, y, oldX, oldY);
 
+    mActivelyScrolling = true;
+    
     if (mOnScrollDispatchHelper.onScrollChanged(x, y)) {
       if (mRemoveClippedSubviews) {
         updateClippingRect();
       }
 
-      mActivelyScrolling = true;
-
-      ReactScrollViewHelper.emitScrollEvent(this);
+      ReactScrollViewHelper.emitScrollEvent(
+        this,
+        mOnScrollDispatchHelper.getXFlingVelocity(),
+        mOnScrollDispatchHelper.getYFlingVelocity());
     }
   }
 
@@ -141,14 +150,19 @@ public class ReactHorizontalScrollView extends HorizontalScrollView implements
       return false;
     }
 
+    mVelocityHelper.calculateVelocity(ev);
     int action = ev.getAction() & MotionEvent.ACTION_MASK;
     if (action == MotionEvent.ACTION_UP && mDragging) {
-      ReactScrollViewHelper.emitScrollEndDragEvent(this);
+      ReactScrollViewHelper.emitScrollEndDragEvent(
+        this,
+        mVelocityHelper.getXVelocity(),
+        mVelocityHelper.getYVelocity());
       mDragging = false;
       // After the touch finishes, we may need to do some scrolling afterwards either as a result
       // of a fling or because we need to page align the content
       handlePostTouchScrolling();
     }
+
     return super.onTouchEvent(ev);
   }
 
@@ -272,22 +286,18 @@ public class ReactHorizontalScrollView extends HorizontalScrollView implements
           mActivelyScrolling = false;
           ReactHorizontalScrollView.this.postOnAnimationDelayed(this, ReactScrollViewHelper.MOMENTUM_DELAY);
         } else {
-          boolean doneWithAllScrolling = true;
           if (mPagingEnabled && !mSnappingToPage) {
             // Only if we have pagingEnabled and we have not snapped to the page do we
             // need to continue checking for the scroll.  And we cause that scroll by asking for it
             mSnappingToPage = true;
             smoothScrollToPage(0);
-            doneWithAllScrolling = false;
-          }
-          if (doneWithAllScrolling) {
+            ReactHorizontalScrollView.this.postOnAnimationDelayed(this, ReactScrollViewHelper.MOMENTUM_DELAY);
+          } else {
             if (mSendMomentumEvents) {
               ReactScrollViewHelper.emitScrollMomentumEndEvent(ReactHorizontalScrollView.this);
             }
             ReactHorizontalScrollView.this.mPostTouchRunnable = null;
             disableFpsListener();
-          } else {
-            ReactHorizontalScrollView.this.postOnAnimationDelayed(this, ReactScrollViewHelper.MOMENTUM_DELAY);
           }
         }
       }
@@ -312,4 +322,30 @@ public class ReactHorizontalScrollView extends HorizontalScrollView implements
     }
     smoothScrollTo(page * width, getScrollY());
   }
+
+  @Override
+  public void setBackgroundColor(int color) {
+    mReactBackgroundManager.setBackgroundColor(color);
+  }
+
+  public void setBorderWidth(int position, float width) {
+    mReactBackgroundManager.setBorderWidth(position, width);
+  }
+
+  public void setBorderColor(int position, float color, float alpha) {
+    mReactBackgroundManager.setBorderColor(position, color, alpha);
+  }
+
+  public void setBorderRadius(float borderRadius) {
+    mReactBackgroundManager.setBorderRadius(borderRadius);
+  }
+
+  public void setBorderRadius(float borderRadius, int position) {
+    mReactBackgroundManager.setBorderRadius(borderRadius, position);
+  }
+
+  public void setBorderStyle(@Nullable String style) {
+    mReactBackgroundManager.setBorderStyle(style);
+  }
+
 }

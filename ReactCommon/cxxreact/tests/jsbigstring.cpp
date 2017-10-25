@@ -1,13 +1,10 @@
-
 // Copyright 2004-present Facebook. All Rights Reserved.
 #include <sys/mman.h>
 #include <fcntl.h>
 
 #include <folly/File.h>
 #include <gtest/gtest.h>
-#include <cxxreact/Executor.h>
-#include <cxxreact/MessageQueueThread.h>
-#include <cxxreact/MethodCall.h>
+#include <cxxreact/JSBigString.h>
 
 using namespace facebook;
 using namespace facebook::react;
@@ -16,7 +13,7 @@ namespace {
 int tempFileFromString(std::string contents)
 {
   std::string tmp {getenv("TMPDIR")};
-  tmp += "/temp.XXXXX";
+  tmp += "/temp.XXXXXX";
 
   std::vector<char> tmpBuf {tmp.begin(), tmp.end()};
   tmpBuf.push_back('\0');

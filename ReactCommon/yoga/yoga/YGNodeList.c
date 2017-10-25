@@ -7,6 +7,8 @@
  * of patent rights can be found in the PATENTS file in the same directory.
  */
 
+#include <string.h>
+
 #include "YGNodeList.h"
 
 extern YGMalloc gYGMalloc;
@@ -21,12 +23,12 @@ struct YGNodeList {
 
 YGNodeListRef YGNodeListNew(const uint32_t initialCapacity) {
   const YGNodeListRef list = gYGMalloc(sizeof(struct YGNodeList));
-  YG_ASSERT(list != NULL, "Could not allocate memory for list");
+  YGAssert(list != NULL, "Could not allocate memory for list");
 
   list->capacity = initialCapacity;
   list->count = 0;
   list->items = gYGMalloc(sizeof(YGNodeRef) * list->capacity);
-  YG_ASSERT(list->items != NULL, "Could not allocate memory for items");
+  YGAssert(list->items != NULL, "Could not allocate memory for items");
 
   return list;
 }
@@ -61,7 +63,7 @@ void YGNodeListInsert(YGNodeListRef *listp, const YGNodeRef node, const uint32_t
   if (list->count == list->capacity) {
     list->capacity *= 2;
     list->items = gYGRealloc(list->items, sizeof(YGNodeRef) * list->capacity);
-    YG_ASSERT(list->items != NULL, "Could not extend allocation for items");
+    YGAssert(list->items != NULL, "Could not extend allocation for items");
   }
 
   for (uint32_t i = list->count; i > index; i--) {
@@ -70,6 +72,17 @@ void YGNodeListInsert(YGNodeListRef *listp, const YGNodeRef node, const uint32_t
 
   list->count++;
   list->items[index] = node;
+}
+
+void YGNodeListReplace(YGNodeListRef list, const uint32_t index, const YGNodeRef newNode) {
+  list->items[index] = newNode;
+}
+
+void YGNodeListRemoveAll(const YGNodeListRef list) {
+  for (uint32_t i = 0; i < list->count; i++) {
+    list->items[i] = NULL;
+  }
+  list->count = 0;
 }
 
 YGNodeRef YGNodeListRemove(const YGNodeListRef list, const uint32_t index) {
@@ -101,4 +114,18 @@ YGNodeRef YGNodeListGet(const YGNodeListRef list, const uint32_t index) {
   }
 
   return NULL;
+}
+
+YGNodeListRef YGNodeListClone(const YGNodeListRef oldList) {
+  if (!oldList) {
+    return NULL;
+  }
+  const uint32_t count = oldList->count;
+  if (count == 0) {
+    return NULL;
+  }
+  const YGNodeListRef newList = YGNodeListNew(count);
+  memcpy(newList->items, oldList->items, sizeof(YGNodeRef) * count);
+  newList->count = count;
+  return newList;
 }

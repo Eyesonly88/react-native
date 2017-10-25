@@ -9,13 +9,14 @@
 
 'use strict';
 
-var fs = require('fs')
+var fs = require('fs');
 var glob = require('glob');
 var mkdirp = require('mkdirp');
 var optimist = require('optimist');
 var path = require('path');
 var removeMd = require('remove-markdown');
 var extractDocs = require('./extractDocs');
+var cache = require('memory-cache');
 var argv = optimist.argv;
 
 function splitHeader(content) {
@@ -35,7 +36,7 @@ function splitHeader(content) {
 function rmFile(file) {
   try {
     fs.unlinkSync(file);
-  } catch(e) {
+  } catch (e) {
     /* seriously, unlink throws when the file doesn't exist :( */
   }
 }
@@ -62,7 +63,7 @@ function extractMetadata(content) {
     var key = keyvalue[0].trim();
     var value = keyvalue.slice(1).join(':').trim();
     // Handle the case where you have "Community #10"
-    try { value = JSON.parse(value); } catch(e) { }
+    try { value = JSON.parse(value); } catch (e) { }
     metadata[key] = value;
   }
   return {metadata: metadata, rawContent: both.content};
@@ -90,9 +91,29 @@ function buildFile(layout, metadata, rawContent) {
   ].filter(e => e).join('\n');
 }
 
-function execute() {
+function execute(options) {
+  if (options === undefined) {
+      options = {};
+  }
+
   var DOCS_MD_DIR = '../docs/';
   var BLOG_MD_DIR = '../blog/';
+  var CONFIG_JSON_DIR = '../';
+
+  // Extracts the Contributor's Guide content from Contributing.md
+  // and inserts into repo's CONTRIBUTING.md
+  const contributingGuide = splitHeader(
+    fs.readFileSync(DOCS_MD_DIR + 'Contributing.md', 'utf8')
+  ).content.replace(/\(\/react-native\//g, '(https://facebook.github.io/react-native/');
+
+  let contributingReadme = fs.readFileSync('../CONTRIBUTING.md', 'utf8');
+  const guideStart = '<!-- generated_contributing_start -->';
+  const guideEnd = '<!-- generated_contributing_end -->';
+  contributingReadme =
+    contributingReadme.slice(0, contributingReadme.indexOf(guideStart) + guideStart.length) +
+    contributingGuide +
+    contributingReadme.slice(contributingReadme.indexOf(guideEnd));
+  fs.writeFileSync('../CONTRIBUTING.md', contributingReadme);
 
   glob.sync('src/react-native/docs/*.*').forEach(rmFile);
   glob.sync('src/react-native/blog/*.*').forEach(rmFile);
@@ -135,23 +156,33 @@ function execute() {
     );
   }
 
-  extractDocs().forEach(function(content) {
-    handleMarkdown(content, null);
-  });
-
-  var files = glob.sync(DOCS_MD_DIR + '**/*.*');
-  files.forEach(function(file) {
-    var extension = path.extname(file);
-    if (extension === '.md' || extension === '.markdown') {
-      var content = fs.readFileSync(file, {encoding: 'utf8'});
-      handleMarkdown(content, path.basename(file));
+  if (options.extractDocs) {
+    // Rendering docs can take up to 8 seconds. We wait until /docs/ are
+    // requested before doing so, then we store the results in memory to
+    // speed up subsequent requests.
+    var extractedDocs = cache.get('extractedDocs');
+    if (!extractedDocs) {
+      extractedDocs = extractDocs();
+      cache.put('extractedDocs', extractedDocs);
     }
+    extractedDocs.forEach(function(content) {
+      handleMarkdown(content, null);
+    });
 
-    if (extension === '.json') {
-      var content = fs.readFileSync(file, {encoding: 'utf8'});
-      metadatas[path.basename(file, '.json')] = JSON.parse(content);
-    }
-  });
+    var files = glob.sync(DOCS_MD_DIR + '**/*.*');
+    files.forEach(function(file) {
+      var extension = path.extname(file);
+      if (extension === '.md' || extension === '.markdown') {
+        var content = fs.readFileSync(file, {encoding: 'utf8'});
+        handleMarkdown(content, path.basename(file));
+      }
+
+      if (extension === '.json') {
+        var content = fs.readFileSync(file, {encoding: 'utf8'});
+        metadatas[path.basename(file, '.json')] = JSON.parse(content);
+      }
+    });
+  }
 
   // we need to pass globals for the components to be configurable
   // metadata is generated in this process which has access to process.env
@@ -163,6 +194,13 @@ function execute() {
     .forEach((key) => {
       metadatas.config[key] = process.env[key];
     });
+
+  // load showcase apps into metadata
+  var showcaseApps = JSON.parse(fs.readFileSync(
+    path.basename(CONFIG_JSON_DIR + 'showcase.json'),
+    {encoding: 'utf8'}
+  ));
+  metadatas.showcaseApps = showcaseApps;
 
   fs.writeFileSync(
     'core/metadata.js',

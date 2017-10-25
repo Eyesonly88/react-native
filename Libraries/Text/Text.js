@@ -11,17 +11,21 @@
  */
 'use strict';
 
+const ColorPropType = require('ColorPropType');
 const EdgeInsetsPropType = require('EdgeInsetsPropType');
 const NativeMethodsMixin = require('NativeMethodsMixin');
 const Platform = require('Platform');
 const React = require('React');
+const PropTypes = require('prop-types');
 const ReactNativeViewAttributes = require('ReactNativeViewAttributes');
 const StyleSheetPropType = require('StyleSheetPropType');
 const TextStylePropTypes = require('TextStylePropTypes');
 const Touchable = require('Touchable');
 
+const createReactClass = require('create-react-class');
 const createReactNativeComponentClass = require('createReactNativeComponentClass');
 const mergeFast = require('mergeFast');
+const processColor = require('processColor');
 
 const stylePropType = StyleSheetPropType(TextStylePropTypes);
 
@@ -31,7 +35,9 @@ const viewConfig = {
     numberOfLines: true,
     ellipsizeMode: true,
     allowFontScaling: true,
+    disabled: true,
     selectable: true,
+    selectionColor: true,
     adjustsFontSizeToFit: true,
     minimumFontScale: true,
     textBreakStrategy: true,
@@ -44,15 +50,16 @@ const viewConfig = {
  *
  * `Text` supports nesting, styling, and touch handling.
  *
- * In the following example, the nested title and body text will inherit the `fontFamily` from
- *`styles.baseText`, but the title provides its own additional styles.  The title and body will
- * stack on top of each other on account of the literal newlines:
+ * In the following example, the nested title and body text will inherit the
+ * `fontFamily` from `styles.baseText`, but the title provides its own
+ * additional styles.  The title and body will stack on top of each other on
+ * account of the literal newlines:
  *
  * ```ReactNativeWebPlayer
  * import React, { Component } from 'react';
  * import { AppRegistry, Text, StyleSheet } from 'react-native';
  *
- * class TextInANest extends Component {
+ * export default class TextInANest extends Component {
  *   constructor(props) {
  *     super(props);
  *     this.state = {
@@ -85,14 +92,206 @@ const viewConfig = {
  *   },
  * });
  *
- * // App registration and rendering
+ * // skip this line if using Create React Native App
  * AppRegistry.registerComponent('TextInANest', () => TextInANest);
  * ```
+ *
+ * ## Nested text
+ *
+ * Both iOS and Android allow you to display formatted text by annotating
+ * ranges of a string with specific formatting like bold or colored text
+ * (`NSAttributedString` on iOS, `SpannableString` on Android). In practice,
+ * this is very tedious. For React Native, we decided to use web paradigm for
+ * this where you can nest text to achieve the same effect.
+ *
+ *
+ * ```ReactNativeWebPlayer
+ * import React, { Component } from 'react';
+ * import { AppRegistry, Text } from 'react-native';
+ *
+ * export default class BoldAndBeautiful extends Component {
+ *   render() {
+ *     return (
+ *       <Text style={{fontWeight: 'bold'}}>
+ *         I am bold
+ *         <Text style={{color: 'red'}}>
+ *           and red
+ *         </Text>
+ *       </Text>
+ *     );
+ *   }
+ * }
+ *
+ * // skip this line if using Create React Native App
+ * AppRegistry.registerComponent('AwesomeProject', () => BoldAndBeautiful);
+ * ```
+ *
+ * Behind the scenes, React Native converts this to a flat `NSAttributedString`
+ * or `SpannableString` that contains the following information:
+ *
+ * ```javascript
+ * "I am bold and red"
+ * 0-9: bold
+ * 9-17: bold, red
+ * ```
+ *
+ * ## Nested views (iOS only)
+ *
+ * On iOS, you can nest views within your Text component. Here's an example:
+ *
+ * ```ReactNativeWebPlayer
+ * import React, { Component } from 'react';
+ * import { AppRegistry, Text, View } from 'react-native';
+ *
+ * export default class BlueIsCool extends Component {
+ *   render() {
+ *     return (
+ *       <Text>
+ *         There is a blue square
+ *         <View style={{width: 50, height: 50, backgroundColor: 'steelblue'}} />
+ *         in between my text.
+ *       </Text>
+ *     );
+ *   }
+ * }
+ *
+ * // skip this line if using Create React Native App
+ * AppRegistry.registerComponent('AwesomeProject', () => BlueIsCool);
+ * ```
+ *
+ * > In order to use this feature, you must give the view a `width` and a `height`.
+ *
+ * ## Containers
+ *
+ * The `<Text>` element is special relative to layout: everything inside is no
+ * longer using the flexbox layout but using text layout. This means that
+ * elements inside of a `<Text>` are no longer rectangles, but wrap when they
+ * see the end of the line.
+ *
+ * ```javascript
+ * <Text>
+ *   <Text>First part and </Text>
+ *   <Text>second part</Text>
+ * </Text>
+ * // Text container: all the text flows as if it was one
+ * // |First part |
+ * // |and second |
+ * // |part       |
+ *
+ * <View>
+ *   <Text>First part and </Text>
+ *   <Text>second part</Text>
+ * </View>
+ * // View container: each text is its own block
+ * // |First part |
+ * // |and        |
+ * // |second part|
+ * ```
+ *
+ * ## Limited Style Inheritance
+ *
+ * On the web, the usual way to set a font family and size for the entire
+ * document is to take advantage of inherited CSS properties like so:
+ *
+ * ```css
+ * html {
+ *   font-family: 'lucida grande', tahoma, verdana, arial, sans-serif;
+ *   font-size: 11px;
+ *   color: #141823;
+ * }
+ * ```
+ *
+ * All elements in the document will inherit this font unless they or one of
+ * their parents specifies a new rule.
+ *
+ * In React Native, we are more strict about it: **you must wrap all the text
+ * nodes inside of a `<Text>` component**. You cannot have a text node directly
+ * under a `<View>`.
+ *
+ *
+ * ```javascript
+ * // BAD: will raise exception, can't have a text node as child of a <View>
+ * <View>
+ *   Some text
+ * </View>
+ *
+ * // GOOD
+ * <View>
+ *   <Text>
+ *     Some text
+ *   </Text>
+ * </View>
+ * ```
+ *
+ * You also lose the ability to set up a default font for an entire subtree.
+ * The recommended way to use consistent fonts and sizes across your
+ * application is to create a component `MyAppText` that includes them and use
+ * this component across your app. You can also use this component to make more
+ * specific components like `MyAppHeaderText` for other kinds of text.
+ *
+ * ```javascript
+ * <View>
+ *   <MyAppText>Text styled with the default font for the entire application</MyAppText>
+ *   <MyAppHeaderText>Text styled as a header</MyAppHeaderText>
+ * </View>
+ * ```
+ *
+ * Assuming that `MyAppText` is a component that simply renders out its
+ * children into a `Text` component with styling, then `MyAppHeaderText` can be
+ * defined as follows:
+ *
+ * ```javascript
+ * class MyAppHeaderText extends Component {
+ *   render() {
+ *     <MyAppText>
+ *       <Text style={{fontSize: 20}}>
+ *         {this.props.children}
+ *       </Text>
+ *     </MyAppText>
+ *   }
+ * }
+ * ```
+ *
+ * Composing `MyAppText` in this way ensures that we get the styles from a
+ * top-level component, but leaves us the ability to add / override them in
+ * specific use cases.
+ *
+ * React Native still has the concept of style inheritance, but limited to text
+ * subtrees. In this case, the second part will be both bold and red.
+ *
+ * ```javascript
+ * <Text style={{fontWeight: 'bold'}}>
+ *   I am bold
+ *   <Text style={{color: 'red'}}>
+ *     and red
+ *   </Text>
+ * </Text>
+ * ```
+ *
+ * We believe that this more constrained way to style text will yield better
+ * apps:
+ *
+ * - (Developer) React components are designed with strong isolation in mind:
+ * You should be able to drop a component anywhere in your application,
+ * trusting that as long as the props are the same, it will look and behave the
+ * same way. Text properties that could inherit from outside of the props would
+ * break this isolation.
+ *
+ * - (Implementor) The implementation of React Native is also simplified. We do
+ * not need to have a `fontFamily` field on every single element, and we do not
+ * need to potentially traverse the tree up to the root every time we display a
+ * text node. The style inheritance is only encoded inside of the native Text
+ * component and doesn't leak to other components or the system itself.
+ *
  */
 
-const Text = React.createClass({
+const Text = createReactClass({
+  displayName: 'Text',
   propTypes: {
     /**
+     * When `numberOfLines` is set, this prop defines how text will be truncated.
+     * `numberOfLines` must be set in conjunction with this prop.
+     *
      * This can be one of the following values:
      *
      * - `head` - The line is displayed so that the end fits in the container and the missing text
@@ -105,11 +304,9 @@ const Text = React.createClass({
      *
      * The default is `tail`.
      *
-     * `numberOfLines` must be set in conjunction with this prop.
-     *
      * > `clip` is working only for iOS
      */
-    ellipsizeMode: React.PropTypes.oneOf(['head', 'middle', 'tail', 'clip']),
+    ellipsizeMode: PropTypes.oneOf(['head', 'middle', 'tail', 'clip']),
     /**
      * Used to truncate the text with an ellipsis after computing the text
      * layout, including line wrapping, such that the total number of lines
@@ -117,31 +314,31 @@ const Text = React.createClass({
      *
      * This prop is commonly used with `ellipsizeMode`.
      */
-    numberOfLines: React.PropTypes.number,
+    numberOfLines: PropTypes.number,
     /**
      * Set text break strategy on Android API Level 23+, possible values are `simple`, `highQuality`, `balanced`
      * The default value is `highQuality`.
      * @platform android
      */
-    textBreakStrategy: React.PropTypes.oneOf(['simple', 'highQuality', 'balanced']),
+    textBreakStrategy: PropTypes.oneOf(['simple', 'highQuality', 'balanced']),
     /**
      * Invoked on mount and layout changes with
      *
      *   `{nativeEvent: {layout: {x, y, width, height}}}`
      */
-    onLayout: React.PropTypes.func,
+    onLayout: PropTypes.func,
     /**
      * This function is called on press.
      *
-     * e.g., `onPress={() => console.log('1st')}``
+     * e.g., `onPress={() => console.log('1st')}`
      */
-    onPress: React.PropTypes.func,
+    onPress: PropTypes.func,
     /**
      * This function is called on long press.
      *
-     * e.g., `onLongPress={this.increaseSize}>``
+     * e.g., `onLongPress={this.increaseSize}>`
      */
-    onLongPress: React.PropTypes.func,
+    onLongPress: PropTypes.func,
     /**
      * When the scroll view is disabled, this defines how far your touch may
      * move off of the button, before deactivating the button. Once deactivated,
@@ -153,44 +350,57 @@ const Text = React.createClass({
     /**
      * Lets the user select text, to use the native copy and paste functionality.
      */
-    selectable: React.PropTypes.bool,
+    selectable: PropTypes.bool,
+    /**
+     * The highlight color of the text.
+     * @platform android
+     */
+    selectionColor: ColorPropType,
     /**
      * When `true`, no visual change is made when text is pressed down. By
      * default, a gray oval highlights the text on press down.
-     *
      * @platform ios
      */
-    suppressHighlighting: React.PropTypes.bool,
+    suppressHighlighting: PropTypes.bool,
     style: stylePropType,
     /**
      * Used to locate this view in end-to-end tests.
      */
-    testID: React.PropTypes.string,
+    testID: PropTypes.string,
     /**
-     * Specifies whether fonts should scale to respect Text Size accessibility setting on iOS. The
+     * Used to locate this view from native code.
+     */
+    nativeID: PropTypes.string,
+    /**
+     * Specifies whether fonts should scale to respect Text Size accessibility settings. The
      * default is `true`.
      */
-    allowFontScaling: React.PropTypes.bool,
+    allowFontScaling: PropTypes.bool,
     /**
      * When set to `true`, indicates that the view is an accessibility element. The default value
      * for a `Text` element is `true`.
      *
      * See the
-     * [Accessibility guide](/react-native/docs/accessibility.html#accessible-ios-android)
+     * [Accessibility guide](docs/accessibility.html#accessible-ios-android)
      * for more information.
      */
-    accessible: React.PropTypes.bool,
+    accessible: PropTypes.bool,
     /**
      * Specifies whether font should be scaled down automatically to fit given style constraints.
      * @platform ios
      */
-    adjustsFontSizeToFit: React.PropTypes.bool,
+    adjustsFontSizeToFit: PropTypes.bool,
 
     /**
      * Specifies smallest possible scale a font can reach when adjustsFontSizeToFit is enabled. (values 0.01-1.0).
      * @platform ios
      */
-    minimumFontScale: React.PropTypes.number,
+    minimumFontScale: PropTypes.number,
+    /**
+     * Specifies the disabled state of the text view for testing purposes
+     * @platform android
+     */
+    disabled: PropTypes.bool,
   },
   getDefaultProps(): Object {
     return {
@@ -210,10 +420,10 @@ const Text = React.createClass({
     return {isInAParentText: true};
   },
   childContextTypes: {
-    isInAParentText: React.PropTypes.bool
+    isInAParentText: PropTypes.bool
   },
   contextTypes: {
-    isInAParentText: React.PropTypes.bool
+    isInAParentText: PropTypes.bool
   },
   /**
    * Only assigned if touch is needed.
@@ -238,6 +448,7 @@ const Text = React.createClass({
         this._handlers = {
           onStartShouldSetResponder: (): bool => {
             const shouldSetFromProps = this.props.onStartShouldSetResponder &&
+                // $FlowFixMe(>=0.41.0)
                 this.props.onStartShouldSetResponder();
             const setResponder = shouldSetFromProps || this._hasPressHandler();
             if (setResponder && !this.touchableHandleActivePressIn) {
@@ -266,11 +477,11 @@ const Text = React.createClass({
                 });
               };
 
-              this.touchableHandlePress = (e: SyntheticEvent) => {
+              this.touchableHandlePress = (e: SyntheticEvent<>) => {
                 this.props.onPress && this.props.onPress(e);
               };
 
-              this.touchableHandleLongPress = (e: SyntheticEvent) => {
+              this.touchableHandleLongPress = (e: SyntheticEvent<>) => {
                 this.props.onLongPress && this.props.onLongPress(e);
               };
 
@@ -278,33 +489,44 @@ const Text = React.createClass({
                 return this.props.pressRetentionOffset || PRESS_RECT_OFFSET;
               };
             }
+            // $FlowFixMe(>=0.41.0)
             return setResponder;
           },
-          onResponderGrant: function(e: SyntheticEvent, dispatchID: string) {
+          onResponderGrant: function(e: SyntheticEvent<>, dispatchID: string) {
+            // $FlowFixMe(>=0.41.0)
             this.touchableHandleResponderGrant(e, dispatchID);
             this.props.onResponderGrant &&
+              // $FlowFixMe(>=0.41.0)
               this.props.onResponderGrant.apply(this, arguments);
           }.bind(this),
-          onResponderMove: function(e: SyntheticEvent) {
+          onResponderMove: function(e: SyntheticEvent<>) {
+            // $FlowFixMe(>=0.41.0)
             this.touchableHandleResponderMove(e);
             this.props.onResponderMove &&
+              // $FlowFixMe(>=0.41.0)
               this.props.onResponderMove.apply(this, arguments);
           }.bind(this),
-          onResponderRelease: function(e: SyntheticEvent) {
+          onResponderRelease: function(e: SyntheticEvent<>) {
+            // $FlowFixMe(>=0.41.0)
             this.touchableHandleResponderRelease(e);
             this.props.onResponderRelease &&
+              // $FlowFixMe(>=0.41.0)
               this.props.onResponderRelease.apply(this, arguments);
           }.bind(this),
-          onResponderTerminate: function(e: SyntheticEvent) {
+          onResponderTerminate: function(e: SyntheticEvent<>) {
+            // $FlowFixMe(>=0.41.0)
             this.touchableHandleResponderTerminate(e);
             this.props.onResponderTerminate &&
+              // $FlowFixMe(>=0.41.0)
               this.props.onResponderTerminate.apply(this, arguments);
           }.bind(this),
           onResponderTerminationRequest: function(): bool {
             // Allow touchable or props.onResponderTerminationRequest to deny
             // the request
+            // $FlowFixMe(>=0.41.0)
             var allowTermination = this.touchableHandleResponderTerminationRequest();
             if (allowTermination && this.props.onResponderTerminationRequest) {
+              // $FlowFixMe(>=0.41.0)
               allowTermination = this.props.onResponderTerminationRequest.apply(this, arguments);
             }
             return allowTermination;
@@ -315,6 +537,12 @@ const Text = React.createClass({
         ...this.props,
         ...this._handlers,
         isHighlighted: this.state.isHighlighted,
+      };
+    }
+    if (newProps.selectionColor != null) {
+      newProps = {
+        ...newProps,
+        selectionColor: processColor(newProps.selectionColor)
       };
     }
     if (Touchable.TOUCH_TARGET_DEBUG && newProps.onPress) {
@@ -340,16 +568,19 @@ type RectOffset = {
 
 var PRESS_RECT_OFFSET = {top: 20, left: 20, right: 20, bottom: 30};
 
-var RCTText = createReactNativeComponentClass(viewConfig);
+var RCTText = createReactNativeComponentClass(
+  viewConfig.uiViewClassName,
+  () => viewConfig
+);
 var RCTVirtualText = RCTText;
 
 if (Platform.OS === 'android') {
-  RCTVirtualText = createReactNativeComponentClass({
+  RCTVirtualText = createReactNativeComponentClass('RCTVirtualText', () => ({
     validAttributes: mergeFast(ReactNativeViewAttributes.UIView, {
       isHighlighted: true,
     }),
     uiViewClassName: 'RCTVirtualText',
-  });
+  }));
 }
 
 module.exports = Text;

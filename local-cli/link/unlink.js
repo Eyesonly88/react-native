@@ -4,16 +4,17 @@ const getProjectDependencies = require('./getProjectDependencies');
 const unregisterDependencyAndroid = require('./android/unregisterNativeModule');
 const unregisterDependencyWindows = require('./windows/unregisterNativeModule');
 const unregisterDependencyIOS = require('./ios/unregisterNativeModule');
+const unregisterDependencyPods = require('./pods/unregisterNativeModule');
 const isInstalledAndroid = require('./android/isInstalled');
 const isInstalledWindows = require('./windows/isInstalled');
 const isInstalledIOS = require('./ios/isInstalled');
+const isInstalledPods = require('./pods/isInstalled');
 const unlinkAssetsAndroid = require('./android/unlinkAssets');
 const unlinkAssetsIOS = require('./ios/unlinkAssets');
 const getDependencyConfig = require('./getDependencyConfig');
 const compact = require('lodash').compact;
 const difference = require('lodash').difference;
 const filter = require('lodash').filter;
-const find = require('lodash').find;
 const flatten = require('lodash').flatten;
 const isEmpty = require('lodash').isEmpty;
 const promiseWaterfall = require('./promiseWaterfall');
@@ -65,16 +66,21 @@ const unlinkDependencyIOS = (iOSProject, dependency, packageName, iOSDependencie
     return;
   }
 
-  const isInstalled = isInstalledIOS(iOSProject, dependency.ios);
-
-  if (!isInstalled) {
+  const isIosInstalled = isInstalledIOS(iOSProject, dependency.ios);
+  const isPodInstalled = isInstalledPods(iOSProject, dependency.ios);
+  if (!isIosInstalled && !isPodInstalled) {
     log.info(`iOS module ${packageName} is not installed`);
     return;
   }
 
   log.info(`Unlinking ${packageName} ios dependency`);
 
-  unregisterDependencyIOS(dependency.ios, iOSProject, iOSDependencies);
+  if (isIosInstalled) {
+    unregisterDependencyIOS(dependency.ios, iOSProject, iOSDependencies);
+  }
+  else if (isPodInstalled) {
+    unregisterDependencyPods(dependency.ios, iOSProject);
+  }
 
   log.info(`iOS module ${packageName} has been successfully unlinked`);
 };
@@ -113,19 +119,20 @@ function unlink(args, config) {
 
   const allDependencies = getDependencyConfig(config, getProjectDependencies());
   const otherDependencies = filter(allDependencies, d => d.name !== packageName);
-  const thisDependency = find(allDependencies, d => d.name === packageName);
   const iOSDependencies = compact(otherDependencies.map(d => d.config.ios));
 
   const tasks = [
-    () => promisify(thisDependency.config.commands.preunlink || commandStub),
+    () => promisify(dependency.commands.preunlink || commandStub),
     () => unlinkDependencyAndroid(project.android, dependency, packageName),
     () => unlinkDependencyIOS(project.ios, dependency, packageName, iOSDependencies),
     () => unlinkDependencyWindows(project.windows, dependency, packageName),
-    () => promisify(thisDependency.config.commands.postunlink || commandStub)
+    () => promisify(dependency.commands.postunlink || commandStub)
   ];
 
   return promiseWaterfall(tasks)
     .then(() => {
+      // @todo move all these to `tasks` array, just like in
+      // link
       const assets = difference(
         dependency.assets,
         flatten(allDependencies, d => d.assets)
@@ -155,7 +162,7 @@ function unlink(args, config) {
       );
       throw err;
     });
-};
+}
 
 module.exports = {
   func: unlink,

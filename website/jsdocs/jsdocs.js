@@ -108,18 +108,18 @@ function getFileDocBlock(commentsForFile) {
       var lines = comment.value.split('\n');
       var inCopyrightBlock = false;
       var filteredLines = lines.filter(function(line) {
-        if (!!line.match(/^\s*\*\s+Copyright \(c\)/)) {
+        if (line.match(/^\s*\*\s+Copyright \(c\)/)) {
           inCopyrightBlock = true;
         }
 
-        var hasProvides = !!line.match(/^\s*\*\s+@provides/);
+        var hasProvidesModule = !!line.match(/^\s*\*\s+@providesModule/);
         var hasFlow = !!line.match(/^\s*\*\s+@flow/);
 
-        if (hasFlow || hasProvides) {
+        if (hasFlow || hasProvidesModule) {
           inCopyrightBlock = false;
         }
 
-        return !inCopyrightBlock && !hasFlow && !hasProvides;
+        return !inCopyrightBlock && !hasFlow && !hasProvidesModule;
       });
       docblock = filteredLines.join('\n');
       return true;
@@ -474,7 +474,7 @@ function getRequireData(node) {
     || (callee.name !== 'require')) {
     return null;
   }
-  var args = node['arguments'];
+  var args = node.arguments;
   if (args.length === 0) {
     return null;
   }

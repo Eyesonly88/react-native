@@ -15,8 +15,9 @@ import android.graphics.Point;
 import android.view.Display;
 import android.view.Surface;
 import android.view.WindowManager;
-
-import com.facebook.react.uimanager.ReactShadowNode;
+import com.facebook.react.uimanager.ReactShadowNodeImpl;
+import com.facebook.yoga.YogaUnit;
+import com.facebook.yoga.YogaValue;
 
 /**
  * FlatReactModalShadowNode
@@ -41,11 +42,11 @@ class FlatReactModalShadowNode extends FlatShadowNode implements AndroidView {
 
   /**
    * We need to set the styleWidth and styleHeight of the one child (represented by the <View/>
-   * within the <RCTModalHostView/> in Modal.js.  This needs to fill the entire window.
+   * within the <RCTModalHostView/> in Modal.js. This needs to fill the entire window.
    */
   @Override
   @TargetApi(16)
-  public void addChildAt(ReactShadowNode child, int i) {
+  public void addChildAt(ReactShadowNodeImpl child, int i) {
     super.addChildAt(child, i);
 
     Context context = getThemedContext();
@@ -86,8 +87,19 @@ class FlatReactModalShadowNode extends FlatShadowNode implements AndroidView {
 
   @Override
   public void setPadding(int spacingType, float padding) {
-    if (getPadding(spacingType) != padding) {
+    YogaValue current = getStylePadding(spacingType);
+    if (current.unit != YogaUnit.POINT || current.value != padding) {
       super.setPadding(spacingType, padding);
+      mPaddingChanged = true;
+      markUpdated();
+    }
+  }
+
+  @Override
+  public void setPaddingPercent(int spacingType, float percent) {
+    YogaValue current = getStylePadding(spacingType);
+    if (current.unit != YogaUnit.PERCENT || current.value != percent) {
+      super.setPadding(spacingType, percent);
       mPaddingChanged = true;
       markUpdated();
     }

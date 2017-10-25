@@ -21,21 +21,31 @@ const walk = require('../util/walk');
  * @param srcPath e.g. '/Users/martin/AwesomeApp/node_modules/react-native/local-cli/templates/HelloWorld'
  * @param destPath e.g. '/Users/martin/AwesomeApp'
  * @param newProjectName e.g. 'AwesomeApp'
+ * @param options e.g. {
+ *          upgrade: true,
+ *          force: false,
+ *          displayName: 'Hello World',
+ *          ignorePaths: ['template/file/to/ignore.md'],
+ *        }
  */
 function copyProjectTemplateAndReplace(srcPath, destPath, newProjectName, options) {
   if (!srcPath) { throw new Error('Need a path to copy from'); }
   if (!destPath) { throw new Error('Need a path to copy to'); }
   if (!newProjectName) { throw new Error('Need a project name'); }
 
+  options = options || {};
+
   walk(srcPath).forEach(absoluteSrcFilePath => {
 
     // 'react-native upgrade'
-    if (options && options.upgrade) {
+    if (options.upgrade) {
       // Don't upgrade these files
       const fileName = path.basename(absoluteSrcFilePath);
       // This also includes __tests__/index.*.js
       if (fileName === 'index.ios.js') { return; }
       if (fileName === 'index.android.js') { return; }
+      if (fileName === 'index.js') { return; }
+      if (fileName === 'App.js') { return; }
     }
 
     const relativeFilePath = path.relative(srcPath, absoluteSrcFilePath);
@@ -43,8 +53,22 @@ function copyProjectTemplateAndReplace(srcPath, destPath, newProjectName, option
       .replace(/HelloWorld/g, newProjectName)
       .replace(/helloworld/g, newProjectName.toLowerCase());
 
+    // Templates may contain files that we don't want to copy.
+    // Examples:
+    // - Dummy package.json file included in the template only for publishing to npm
+    // - Docs specific to the template (.md files)
+    if (options.ignorePaths) {
+      if (!Array.isArray(options.ignorePaths)) {
+        throw new Error('options.ignorePaths must be an array');
+      }
+      if (options.ignorePaths.some(ignorePath => ignorePath === relativeFilePath)) {
+        // Skip copying this file
+        return;
+      }
+    }
+
     let contentChangedCallback = null;
-    if (options && options.upgrade && (!options.force)) {
+    if (options.upgrade && (!options.force)) {
       contentChangedCallback = (_, contentChanged) => {
         return upgradeFileContentChangedCallback(
           absoluteSrcFilePath,
@@ -57,6 +81,7 @@ function copyProjectTemplateAndReplace(srcPath, destPath, newProjectName, option
       absoluteSrcFilePath,
       path.resolve(destPath, relativeRenamedPath),
       {
+        'Hello App Display Name': options.displayName || newProjectName,
         'HelloWorld': newProjectName,
         'helloworld': newProjectName.toLowerCase(),
       },
@@ -74,7 +99,7 @@ function copyProjectTemplateAndReplace(srcPath, destPath, newProjectName, option
  * behavior of automatically renaming .gitignore to .npmignore.
  */
 function dotFilePath(path) {
-  if (!path) return path;
+  if (!path) {return path;}
   return path
     .replace('_gitignore', '.gitignore')
     .replace('_gitattributes', '.gitattributes')

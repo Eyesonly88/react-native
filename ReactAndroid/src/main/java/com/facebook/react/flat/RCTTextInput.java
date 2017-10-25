@@ -9,7 +9,8 @@
 
 package com.facebook.react.flat;
 
-import javax.annotation.Nullable;
+import static com.facebook.react.views.text.ReactRawTextShadowNode.PROP_TEXT;
+import static com.facebook.react.views.text.ReactTextShadowNode.UNSET;
 
 import android.annotation.TargetApi;
 import android.os.Build;
@@ -17,11 +18,6 @@ import android.text.SpannableStringBuilder;
 import android.util.TypedValue;
 import android.view.ViewGroup;
 import android.widget.EditText;
-
-import com.facebook.yoga.YogaMeasureMode;
-import com.facebook.yoga.YogaMeasureFunction;
-import com.facebook.yoga.YogaNodeAPI;
-import com.facebook.yoga.YogaMeasureOutput;
 import com.facebook.infer.annotation.Assertions;
 import com.facebook.react.uimanager.PixelUtil;
 import com.facebook.react.uimanager.Spacing;
@@ -32,9 +28,11 @@ import com.facebook.react.uimanager.ViewProps;
 import com.facebook.react.uimanager.annotations.ReactProp;
 import com.facebook.react.views.text.ReactTextUpdate;
 import com.facebook.react.views.view.MeasureUtil;
-
-import static com.facebook.react.views.text.ReactTextShadowNode.PROP_TEXT;
-import static com.facebook.react.views.text.ReactTextShadowNode.UNSET;
+import com.facebook.yoga.YogaMeasureFunction;
+import com.facebook.yoga.YogaMeasureMode;
+import com.facebook.yoga.YogaMeasureOutput;
+import com.facebook.yoga.YogaNode;
+import javax.annotation.Nullable;
 
 public class RCTTextInput extends RCTVirtualText implements AndroidView, YogaMeasureFunction {
 
@@ -73,11 +71,12 @@ public class RCTTextInput extends RCTVirtualText implements AndroidView, YogaMea
     setDefaultPadding(Spacing.TOP, mEditText.getPaddingTop());
     setDefaultPadding(Spacing.END, mEditText.getPaddingEnd());
     setDefaultPadding(Spacing.BOTTOM, mEditText.getPaddingBottom());
+    mEditText.setPadding(0, 0, 0, 0);
   }
 
   @Override
   public long measure(
-      YogaNodeAPI node,
+      YogaNode node,
       float width,
       YogaMeasureMode widthMode,
       float height,
@@ -90,11 +89,6 @@ public class RCTTextInput extends RCTVirtualText implements AndroidView, YogaMea
         TypedValue.COMPLEX_UNIT_PX,
         fontSize == UNSET ?
             (int) Math.ceil(PixelUtil.toPixelFromSP(ViewDefaults.FONT_SIZE_SP)) : fontSize);
-    editText.setPadding(
-        (int) Math.ceil(getPadding(Spacing.START)),
-        (int) Math.ceil(getPadding(Spacing.TOP)),
-        (int) Math.ceil(getPadding(Spacing.END)),
-        (int) Math.ceil(getPadding(Spacing.BOTTOM)));
 
     if (mNumberOfLines != UNSET) {
       editText.setLines(mNumberOfLines);

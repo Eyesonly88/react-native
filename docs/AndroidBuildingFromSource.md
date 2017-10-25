@@ -4,7 +4,8 @@ title: Building React Native from source
 layout: docs
 category: Guides (Android)
 permalink: docs/android-building-from-source.html
-next: activityindicator
+banner: ejected
+next: communication-android
 previous: android-ui-performance
 ---
 
@@ -54,7 +55,7 @@ ndk.dir=/Users/your_unix_name/android-ndk/android-ndk-r10e
 3. Windows (64-bit) - http://dl.google.com/android/repository/android-ndk-r10e-windows-x86_64.zip
 4. Windows (32-bit) - http://dl.google.com/android/repository/android-ndk-r10e-windows-x86.zip
 
-You can find further instructions on the [official page](http://developer.android.com/ndk/downloads/index.html).
+You can find further instructions on the [official page](https://developer.android.com/ndk/index.html).
 
 ## Building the source
 
@@ -142,9 +143,21 @@ gradle.projectsLoaded {
 }
 ```
 
+## Building for Maven/Nexus deployment
+
+If you find that you need to push up a locally compiled React Native .aar and related files to a remote Nexus repository, you can.
+
+Start by following the `Point Gradle to your Android SDK` section of this page. Once you do this, assuming you have Gradle configured properly, you can then run the following command from the root of your React Native checkout to build and package all required files:
+
+```
+./gradlew ReactAndroid:installArchives
+```
+
+This will package everything that would typically be included in the `android` directory of your `node_modules/react-native/` installation in the root directory of your React Native checkout.
+
 ## Testing
 
-If you made changes to React Native and submit a pull request, all tests will run on your pull request automatically. To run the tests locally, see [Testing](/react-native/docs/testing.html).
+If you made changes to React Native and submit a pull request, all tests will run on your pull request automatically. To run the tests locally, see [Running Tests](docs/testing.html).
 
 ## Troubleshooting
 
